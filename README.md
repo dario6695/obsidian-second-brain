@@ -248,10 +248,12 @@ Both well under the 10s timeout.
 
 | Hook | Output size | Approx tokens |
 |---|---|---|
-| SessionStart | 40,582 chars | ~10,145 tokens (once per session) |
+| SessionStart | ~34KB injected | **~2.3k tokens** (once per session, measured) |
 | UserPromptSubmit (per message) | ~1,133 chars | ~283 tokens |
 
 Estimated **5,000–15,000 tokens saved per session** vs manual `Read` calls.
+
+**On the SessionStart footprint (corrected 2026-06-08):** an earlier estimate put this at ~10k tokens from raw char count, and assumed the injection landed in the system prompt and was therefore unbilled. Both were wrong. Measured directly from a fresh, zero-message session, the vault injection lands in **Messages** and is billed as regular input tokens — but the real tokenized footprint is only **~2.3k tokens**, not ~10k. The char-to-token estimate was inflated because the injected files are sparse markdown, not dense prose. (A separate ~33k autocompact buffer of summarized history can accumulate in Messages on long sessions, but that is conversation history, not vault injection.)
 
 ### Accuracy: grep vs vector search (same 5 test prompts)
 
@@ -264,6 +266,28 @@ Estimated **5,000–15,000 tokens saved per session** vs manual `Read` calls.
 | cancel queued runs | ✅ hit 1 | ✅ hit 1+3+4 all relevant |
 
 **~60% → ~95% top-5 accuracy** after switching from keyword grep to vector search.
+
+## Comparison: vault vector search vs. graphify
+
+[graphify](https://github.com/safishamsi/graphify) is the closest-looking tool in the Claude Code ecosystem, so it's worth being explicit about why this repo is not a competitor to it — they solve different problems.
+
+| Dimension | This repo (vault vector search) | graphify |
+|---|---|---|
+| **Problem domain** | Personal knowledge retrieval (work notes, meetings, decisions) | Codebase comprehension for AI coding assistants |
+| **Input** | Markdown vault (Obsidian notes) | Code, SQL schemas, docs, PDFs, images, videos |
+| **Core mechanic** | `nomic-embed-text` embeddings → cosine similarity → top-5 note chunks injected | AST parsing (Tree-sitter) + LLM extraction → graph + Leiden community detection |
+| **Query style** | Semantic: "what did I decide about X?" | Graph traversal: "what calls what, what depends on what?" |
+| **Time dimension** | Yes — temporal queries ("what were we discussing two weeks ago?") | No — structural snapshot |
+| **Live/incremental** | Stop hook re-indexes every session automatically | `--update` re-extracts changed files on demand |
+| **Output** | Note chunks injected into context per session | `graph.html`, `GRAPH_REPORT.md`, `graph.json` |
+
+### On token cost
+
+graphify advertises a ~71.5× reduction (BFS subgraph ≈ 2k tokens vs. ~123k naive). That baseline is *dumping a whole codebase into context* — it never applies to a notes vault, where the relevant slice is already small. The honest baseline for this repo is **manual `Read` calls** Claude would otherwise make to discover context (~5k tokens/session, see Benchmark above). The two numbers measure different things against different baselines and are not directly comparable.
+
+### They compose
+
+graphify's `--obsidian --obsidian-dir <vault>` writes code-graph nodes (functions, modules, dependencies) into a vault as wikilinked notes. This repo's vector search then surfaces those code concepts alongside work notes in the same semantic query — code structure and work context unified in one search. Run graphify after major code changes, write the nodes into the vault, and let the `UserPromptSubmit` hook find them contextually.
 
 ## Notes
 
